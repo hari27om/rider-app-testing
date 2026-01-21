@@ -13,6 +13,7 @@ import os from "os";
 import { Server } from "socket.io";
 import cookies from "cookie-parser";
 import { uploadFiles } from "./controller/riderController.js";
+import tripRoutes from "./routes/tripRoutes.js";
 
 const app = express();
 const server = http.createServer(app);
@@ -126,12 +127,18 @@ io.on("connection", (socket) => {
     console.log(`Rider joined room: rider:${riderId}`);
   });
 
+  socket.on("joinTrip", ({ tripId }) => {
+  if (!tripId) return;
+  socket.join(`trip:${tripId}`);
+  console.log(`socket ${socket.id} joined trip:${tripId}`);
+});
+
   socket.on("disconnect", () => {
     console.log("Client disconnected:", socket.id);
   });
 });
 
-
+app.use("/api/v1/rider/trips", tripRoutes);
 app.use("/api/v1", customerRoutes);
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/rider", riderRoutes);
