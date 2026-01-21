@@ -13,7 +13,7 @@ import os from "os";
 import { Server } from "socket.io";
 import cookies from "cookie-parser";
 import { uploadFiles } from "./controller/riderController.js";
-import tripRoutes from "./routes/tripRoutes.js";
+import locationRoutes from './routes/locationRoutes.js';
 
 const app = express();
 const server = http.createServer(app);
@@ -29,7 +29,7 @@ app.use(
       "http://localhost:3001",
       "http://dep-washrz-dev.s3-website.ap-south-1.amazonaws.com",
       "https://www.magha1.com",
-       "http://erp.drydash.in.s3-website.ap-south-1.amazonaws.com",
+      "http://erp.drydash.in.s3-website.ap-south-1.amazonaws.com",
       "https://erp.drydash.in",
       "http://localhost:5173",
       "https://new.drydash.in",
@@ -39,7 +39,7 @@ app.use(
     credentials: true, // Allow credentials (cookies) to be sent with the request
   })
 );
- 
+
 console.log(`The total number of CPUs is ${os.cpus().length}`);
 const io = new Server(server, {
   cors: {
@@ -68,14 +68,16 @@ const addAppToRequest = (app) => {
     next();
   };
 };
- 
- 
+
+
 const addSocketToRequest = (io) => {
   return (req, res, next) => {
     req.socket = io; // Add the socket object to the request
     next();
   };
 };
+
+app.use('/api/v1/location', locationRoutes);
 app.get("/heavy", (req, res) => {
   let total = 18;
   for (let i = 0; i < 5000000000; i++) {
@@ -92,7 +94,7 @@ app.get("/test", (req, res) => {
 });
 
 
-app.use("/api/v1/rider/uploadFiles/:id", addAppToRequest(app),uploadFiles);
+app.use("/api/v1/rider/uploadFiles/:id", addAppToRequest(app), uploadFiles);
 
 app.use(express.json({ limit: '100mb' }));
 app.use(addSocketToRequest(io));
@@ -119,7 +121,7 @@ io.on("connection", (socket) => {
   console.log("hii this is the socket id--->> ", socket.id);
   socket.emit("backendMessage", { message: "a new client connected" });
 
-  
+
   socket.on("joinRider", ({ riderId }) => {
     if (!riderId) return;
 
@@ -127,18 +129,31 @@ io.on("connection", (socket) => {
     console.log(`Rider joined room: rider:${riderId}`);
   });
 
-  socket.on("joinTrip", ({ tripId }) => {
-  if (!tripId) return;
-  socket.join(`trip:${tripId}`);
-  console.log(`socket ${socket.id} joined trip:${tripId}`);
-});
+  // allow admin/dashboard to subscribe to a trip
+  socket.on('subscribe:trip', (tripId) => {
+    if (!tripId) return;
+    socket.join(`trip:${tripId}`);
+    console.log(`Socket ${socket.id} joined room trip:${tripId}`);
+  });
+
+  socket.on('unsubscribe:trip', (tripId) => {
+    if (!tripId) return;
+    socket.leave(`trip:${tripId}`);
+    console.log(`Socket ${socket.id} left room trip:${tripId}`);
+  });
+
+  socket.on('rider:location', (payload) => {
+    if (payload?.tripId) {
+      io.to(`trip:${payload.tripId}`).emit('location:update', payload);
+    }
+  });
+
 
   socket.on("disconnect", () => {
     console.log("Client disconnected:", socket.id);
   });
 });
 
-app.use("/api/v1/rider/trips", tripRoutes);
 app.use("/api/v1", customerRoutes);
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/rider", riderRoutes);
