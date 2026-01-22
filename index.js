@@ -13,7 +13,9 @@ import os from "os";
 import { Server } from "socket.io";
 import cookies from "cookie-parser";
 import { uploadFiles } from "./controller/riderController.js";
-import locationRoutes from './routes/locationRoutes.js';
+import riderLocationRoutes from "./routes/riderLocationRoutes.js";
+import RiderLocation from "./models/riderLocationSchema.js";
+import User from "./models/userModel.js";
 
 const app = express();
 const server = http.createServer(app);
@@ -77,7 +79,15 @@ const addSocketToRequest = (io) => {
   };
 };
 
-app.use('/api/v1/location', locationRoutes);
+// NOTE: Body parser should be registered early so routes can use req.body
+app.use(express.json({ limit: "100mb" }));
+
+// Attach io to requests early if any route/middleware needs req.socket
+app.use(addSocketToRequest(io));
+
+// If uploadFiles expects req.body or req.socket, it will now have them
+app.use("/api/v1/rider/uploadFiles/:id", addAppToRequest(app), uploadFiles);
+
 app.get("/heavy", (req, res) => {
   let total = 18;
   for (let i = 0; i < 5000000000; i++) {
@@ -109,54 +119,186 @@ app.post("/send", (req, res) => {
     message: "Sent Successfully",
   });
 
-  io.on("connection", (socket) => {
-    console.log("Connected");
-    socket.on("disconnect", () => {
-      console.log("Client disconnected");
-    });
-  });
+  // io.on("connection", (socket) => {
+  //   console.log("Connected");
+  //   socket.on("disconnect", () => {
+  //     console.log("Client disconnected");
+  //   });
+  // });
 });
 
+// In-memory fast-access store for active riders
+const activeRiderLocations = new Map(); // riderId -> location data
+const adminRooms = new Set();
+
 io.on("connection", (socket) => {
-  console.log("hii this is the socket id--->> ", socket.id);
+  console.log("Socket connected:", socket.id);
   socket.emit("backendMessage", { message: "a new client connected" });
 
-
+  // Rider joins its room
   socket.on("joinRider", ({ riderId }) => {
     if (!riderId) return;
-
     socket.join(`rider:${riderId}`);
+    socket.riderId = riderId;
     console.log(`Rider joined room: rider:${riderId}`);
-  });
 
-  // allow admin/dashboard to subscribe to a trip
-  socket.on('subscribe:trip', (tripId) => {
-    if (!tripId) return;
-    socket.join(`trip:${tripId}`);
-    console.log(`Socket ${socket.id} joined room trip:${tripId}`);
-  });
-
-  socket.on('unsubscribe:trip', (tripId) => {
-    if (!tripId) return;
-    socket.leave(`trip:${tripId}`);
-    console.log(`Socket ${socket.id} left room trip:${tripId}`);
-  });
-
-  socket.on('rider:location', (payload) => {
-    if (payload?.tripId) {
-      io.to(`trip:${payload.tripId}`).emit('location:update', payload);
+    if (!activeRiderLocations.has(riderId)) {
+      activeRiderLocations.set(riderId, {
+        status: "active",
+        lastUpdate: new Date()
+      });
     }
   });
 
+  // Admin joins dashboard
+  socket.on("joinAdmin", () => {
+    socket.join("admin-dashboard");
+    adminRooms.add(socket.id);
+    console.log(`Admin joined: ${socket.id}`);
+
+    const allRiders = Array.from(activeRiderLocations.entries()).map(([id, data]) => ({
+      riderId: id,
+      ...data,
+    }));
+    socket.emit("allActiveRiders", allRiders);
+  });
+
+  // Rider sends location update
+  socket.on("riderLocationUpdate", async (data) => {
+    const { riderId, location, speed, bearing, batteryLevel } = data;
+    if (!riderId || !location) {
+      console.log("Invalid location update:", data);
+      return;
+    }
+
+    const locationData = {
+      location: { type: "Point", coordinates: [location.lng, location.lat] },
+      lat: location.lat,
+      lng: location.lng,
+      speed: speed || 0,
+      bearing: bearing || 0,
+      batteryLevel: batteryLevel || 100,
+      lastUpdate: new Date(),
+      status: "active",
+    };
+
+    // Update in-memory store
+    activeRiderLocations.set(riderId, locationData);
+
+    try {
+      const user = await User.findById(riderId).select("name phone");
+
+      await RiderLocation.create({
+        riderId,
+        name: user?.name || "Unknown Rider",
+        phone: user?.phone || "N/A",
+        location: locationData.location,
+        speed: locationData.speed,
+        bearing: locationData.bearing,
+        batteryLevel: locationData.batteryLevel,
+        status: "active",
+        lastUpdate: locationData.lastUpdate,
+      });
+    } catch (error) {
+      console.error("Error saving rider location:", error);
+    }
+
+    // Broadcast to admin dashboard sockets
+    io.to("admin-dashboard").emit("riderLocationUpdate", {
+      riderId,
+      ...locationData,
+    });
+  });
+
+  // Update status (active/idle/offline/etc.)
+  socket.on("riderStatusUpdate", ({ riderId, status }) => {
+    if (!riderId || !status) return;
+    const riderData = activeRiderLocations.get(riderId);
+    if (riderData) {
+      riderData.status = status;
+      riderData.lastUpdate = new Date();
+      activeRiderLocations.set(riderId, riderData);
+
+      io.to("admin-dashboard").emit("riderStatusUpdate", {
+        riderId,
+        status,
+        lastUpdate: riderData.lastUpdate,
+      });
+    }
+  });
+
+  // Admin asks for specific rider location
+  socket.on("getRiderLocation", async ({ riderId }) => {
+    const locationData = activeRiderLocations.get(riderId);
+    if (locationData) {
+      socket.emit("riderLocation", { riderId, ...locationData });
+      return;
+    }
+
+    try {
+      const latestLocation = await RiderLocation.findOne({ riderId }).sort({ lastUpdate: -1 }).limit(1);
+      if (latestLocation) {
+        socket.emit("riderLocation", {
+          riderId,
+          lat: latestLocation.location.coordinates[1],
+          lng: latestLocation.location.coordinates[0],
+          lastUpdate: latestLocation.lastUpdate,
+          status: "offline", // offline because not present in active map
+        });
+      } else {
+        socket.emit("riderLocation", { riderId, message: "No location found" });
+      }
+    } catch (error) {
+      console.error("Error fetching rider location:", error);
+    }
+  });
 
   socket.on("disconnect", () => {
     console.log("Client disconnected:", socket.id);
+    if (adminRooms.has(socket.id)) adminRooms.delete(socket.id);
+
+    // If a rider disconnected, schedule mark-as-offline after 5 minutes if no further updates
+    if (socket.riderId) {
+      setTimeout(() => {
+        const riderData = activeRiderLocations.get(socket.riderId);
+        if (riderData && new Date() - riderData.lastUpdate > 5 * 60 * 1000) {
+          riderData.status = "offline";
+          activeRiderLocations.set(socket.riderId, riderData);
+
+          io.to("admin-dashboard").emit("riderStatusUpdate", {
+            riderId: socket.riderId,
+            status: "offline",
+            lastUpdate: riderData.lastUpdate,
+          });
+        }
+      }, 5 * 60 * 1000);
+    }
   });
 });
+
+// Periodic cleanup: mark riders offline if no update for 5 minutes
+setInterval(() => {
+  const now = new Date();
+  const FIVE_MINUTES = 5 * 60 * 1000;
+
+  for (const [riderId, data] of activeRiderLocations.entries()) {
+    if (now - data.lastUpdate > FIVE_MINUTES && data.status !== "offline") {
+      data.status = "offline";
+      activeRiderLocations.set(riderId, data);
+
+      io.to("admin-dashboard").emit("riderStatusUpdate", {
+        riderId,
+        status: "offline",
+        lastUpdate: data.lastUpdate,
+      });
+    }
+  }
+}, 60 * 1000);
 
 app.use("/api/v1", customerRoutes);
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/rider", riderRoutes);
+app.use("/api/v1/location", riderLocationRoutes);
 app.use("/api/v1/plant", plantRoutes);
 app.use("/api/v1", revenueRoutes);
 app.all("*", (req, res, next) => {
