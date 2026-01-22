@@ -160,4 +160,75 @@ router.get("/dashboard-stats", async (req, res) => {
   }
 });
 
+router.post("/update", async (req, res) => {
+  try {
+    const { riderId, lat, lng, speed = 0, bearing = 0, batteryLevel = 100, status = "active" } = req.body;
+
+    if (!riderId || !lat || !lng) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Missing required fields: riderId, lat, lng" 
+      });
+    }
+
+    const user = await User.findById(riderId).select("name phone");
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "Rider not found" 
+      });
+    }
+
+    const location = {
+      type: "Point",
+      coordinates: [parseFloat(lng), parseFloat(lat)]
+    };
+
+    // Update the rider's current location (upsert)
+    const updatedLocation = await RiderLocation.findOneAndUpdate(
+      { riderId },
+      {
+        riderId,
+        name: user.name,
+        phone: user.phone,
+        location,
+        speed: parseFloat(speed),
+        bearing: parseFloat(bearing),
+        batteryLevel: parseInt(batteryLevel),
+        status,
+        lastUpdate: new Date()
+      },
+      {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true
+      }
+    );
+
+    // Also keep history in a separate collection if needed
+    await LocationHistory.create({
+      riderId,
+      location,
+      speed: parseFloat(speed),
+      bearing: parseFloat(bearing),
+      batteryLevel: parseInt(batteryLevel),
+      status,
+      timestamp: new Date()
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Location updated successfully",
+      location: updatedLocation
+    });
+  } catch (error) {
+    console.error("Error updating location:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: "Server error",
+      error: error.message 
+    });
+  }
+});
+
 export default router;
