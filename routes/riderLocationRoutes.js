@@ -6,10 +6,10 @@ const router = express.Router();
 
 router.get("/active-riders", async (req, res) => {
   try {
-    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+    const fiveSecondAgo = new Date(Date.now() - 5000);
 
     const activeRiders = await RiderLocation.aggregate([
-      { $match: { lastUpdate: { $gte: fiveMinutesAgo }, status: { $in: ["active", "on-delivery", "on-pickup"] } } },
+      { $match: { lastUpdate: { $gte: fiveSecondAgo }, status: { $in: ["active", "on-delivery", "on-pickup"] } } },
       { $sort: { lastUpdate: -1 } },
       { $group: { _id: "$riderId", latestLocation: { $first: "$$ROOT" } } },
       { $lookup: { from: "users", localField: "_id", foreignField: "_id", as: "riderDetails" } },
@@ -234,12 +234,10 @@ router.post("/update", async (req, res) => {
 // API to get all riders with their latest locations
 router.get("/riders/live", async (req, res) => {
   try {
-    // Get all users with role 'rider'
     const allRiders = await User.find({ role: "rider" })
       .select("_id name phone email role avatar")
       .lean();
 
-    // Get latest location for each rider
     const riderIds = allRiders.map(rider => rider._id);
     
     const latestLocations = await RiderLocation.aggregate([
@@ -259,7 +257,8 @@ router.get("/riders/live", async (req, res) => {
       }
     ]);
 
-    // Combine rider info with location
+    const activeRiderLocations = req.app.locals.activeRiderLocations || new Map();
+    
     const ridersWithLocation = allRiders.map(rider => {
       const locationData = latestLocations.find(loc => 
         loc._id.toString() === rider._id.toString()
@@ -267,13 +266,30 @@ router.get("/riders/live", async (req, res) => {
       
       const location = locationData?.latestLocation;
       
+      const riderIdStr = rider._id.toString();
+      let realTimeStatus = "offline";
+      let lastUpdateTime = location?.lastUpdate;
+      
+      if (activeRiderLocations.has(riderIdStr)) {
+        const activeData = activeRiderLocations.get(riderIdStr);
+        realTimeStatus = activeData.status || "offline";
+        lastUpdateTime = activeData.lastUpdate || location?.lastUpdate;
+      }
+      
+      if (lastUpdateTime) {
+        const fiveSecondAgo = new Date(Date.now() - 5000);
+        if (new Date(lastUpdateTime) < fiveSecondAgo) {
+          realTimeStatus = "offline";
+        }
+      }
+      
       return {
         id: rider._id,
         name: rider.name,
         phone: rider.phone,
         email: rider.email,
         avatar: rider.avatar,
-        status: location?.status || "offline",
+        status: realTimeStatus,
         currentLocation: location?.location ? {
           lat: location.location.coordinates[1],
           lng: location.location.coordinates[0]
@@ -281,11 +297,11 @@ router.get("/riders/live", async (req, res) => {
         speed: location?.speed || 0,
         bearing: location?.bearing || 0,
         batteryLevel: location?.batteryLevel || 100,
-        lastUpdate: location?.lastUpdate,
-        assignedOrders: 0, // You'll populate this later
-        completedToday: 0, // You'll populate this later
-        vehicle: "Bike", // Default or fetch from user profile
-        rating: 4.5 // Default or fetch from user profile
+        lastUpdate: lastUpdateTime,
+        assignedOrders: 0,
+        completedToday: 0,
+        vehicle: "Bike",
+        rating: 4.5
       };
     });
 
