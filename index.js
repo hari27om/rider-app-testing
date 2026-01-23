@@ -144,7 +144,8 @@ app.post("/send", (req, res) => {
 });
 
 // In-memory fast-access store for active riders
-const activeRiderLocations = new Map(); // riderId -> location data
+const activeRiderLocations = new Map();
+io.sockets.activeRiderLocations = activeRiderLocations;
 const adminRooms = new Set();
 
 io.on("connection", (socket) => {

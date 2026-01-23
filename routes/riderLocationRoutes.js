@@ -6,11 +6,11 @@ const router = express.Router();
 
 router.get("/active-riders", async (req, res) => {
   try {
-    const fiveSecondAgo = new Date(Date.now() - 5000);
+    const seventySecondsAgo = new Date(Date.now() - 70000);
 
     const activeRiders = await RiderLocation.aggregate([
-      { $match: { lastUpdate: { $gte: fiveSecondAgo }, status: { $in: ["active", "on-delivery", "on-pickup"] } } },
-      { $sort: { lastUpdate: -1 } },
+      { $match: { lastUpdate: { $gte: seventySecondsAgo }, status: { $in: ["active", "on-delivery", "on-pickup"] } } },
+            { $sort: { lastUpdate: -1 } },
       { $group: { _id: "$riderId", latestLocation: { $first: "$$ROOT" } } },
       { $lookup: { from: "users", localField: "_id", foreignField: "_id", as: "riderDetails" } },
       { $unwind: "$riderDetails" },
@@ -165,17 +165,17 @@ router.post("/update", async (req, res) => {
     const { riderId, lat, lng, speed = 0, bearing = 0, batteryLevel = 100, status = "active" } = req.body;
 
     if (!riderId || !lat || !lng) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Missing required fields: riderId, lat, lng" 
+      return res.status(400).json({
+        success: false,
+        message: "Missing required fields: riderId, lat, lng"
       });
     }
 
     const user = await User.findById(riderId).select("name phone");
     if (!user) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Rider not found" 
+      return res.status(404).json({
+        success: false,
+        message: "Rider not found"
       });
     }
 
@@ -223,10 +223,10 @@ router.post("/update", async (req, res) => {
     });
   } catch (error) {
     console.error("Error updating location:", error);
-    res.status(500).json({ 
-      success: false, 
+    res.status(500).json({
+      success: false,
       message: "Server error",
-      error: error.message 
+      error: error.message
     });
   }
 });
@@ -265,21 +265,28 @@ router.get("/riders/live", async (req, res) => {
       );
       
       const location = locationData?.latestLocation;
-      
       const riderIdStr = rider._id.toString();
-      let realTimeStatus = "offline";
+      let status = "offline";
       let lastUpdateTime = location?.lastUpdate;
-      
+    
       if (activeRiderLocations.has(riderIdStr)) {
         const activeData = activeRiderLocations.get(riderIdStr);
-        realTimeStatus = activeData.status || "offline";
+        status = activeData.status || "offline";
         lastUpdateTime = activeData.lastUpdate || location?.lastUpdate;
+      } else if (location) {
+        // Not in real-time map, check database with threshold
+        const seventySecondsAgo = new Date(Date.now() - 70000);
+        if (new Date(location.lastUpdate) >= seventySecondsAgo) {
+          status = location.status || "active";
+        } else {
+          status = "offline";
+        }
       }
       
       if (lastUpdateTime) {
-        const fiveSecondAgo = new Date(Date.now() - 5000);
-        if (new Date(lastUpdateTime) < fiveSecondAgo) {
-          realTimeStatus = "offline";
+        const seventySecondsAgo = new Date(Date.now() - 70000);
+        if (new Date(lastUpdateTime) < seventySecondsAgo) {
+          status = "offline";
         }
       }
       
@@ -289,7 +296,7 @@ router.get("/riders/live", async (req, res) => {
         phone: rider.phone,
         email: rider.email,
         avatar: rider.avatar,
-        status: realTimeStatus,
+        status: status,
         currentLocation: location?.location ? {
           lat: location.location.coordinates[1],
           lng: location.location.coordinates[0]
@@ -324,24 +331,24 @@ router.get("/riders/live", async (req, res) => {
 router.get("/riders/:riderId", async (req, res) => {
   try {
     const { riderId } = req.params;
-    
+
     // Get rider info
     const rider = await User.findById(riderId)
       .select("_id name phone email role avatar")
       .lean();
-    
+
     if (!rider) {
       return res.status(404).json({
         success: false,
         message: "Rider not found"
       });
     }
-    
+
     // Get latest location
     const latestLocation = await RiderLocation.findOne({ riderId })
       .sort({ lastUpdate: -1 })
       .lean();
-    
+
     const riderData = {
       id: rider._id,
       name: rider.name,
@@ -362,7 +369,7 @@ router.get("/riders/:riderId", async (req, res) => {
       vehicle: "Bike",
       rating: 4.5
     };
-    
+
     res.status(200).json({
       success: true,
       rider: riderData
