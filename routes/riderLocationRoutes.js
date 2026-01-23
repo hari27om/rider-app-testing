@@ -231,4 +231,134 @@ router.post("/update", async (req, res) => {
   }
 });
 
+// API to get all riders with their latest locations
+router.get("/riders/live", async (req, res) => {
+  try {
+    // Get all users with role 'rider'
+    const allRiders = await User.find({ role: "rider" })
+      .select("_id name phone email role avatar")
+      .lean();
+
+    // Get latest location for each rider
+    const riderIds = allRiders.map(rider => rider._id);
+    
+    const latestLocations = await RiderLocation.aggregate([
+      {
+        $match: {
+          riderId: { $in: riderIds }
+        }
+      },
+      {
+        $sort: { lastUpdate: -1 }
+      },
+      {
+        $group: {
+          _id: "$riderId",
+          latestLocation: { $first: "$$ROOT" }
+        }
+      }
+    ]);
+
+    // Combine rider info with location
+    const ridersWithLocation = allRiders.map(rider => {
+      const locationData = latestLocations.find(loc => 
+        loc._id.toString() === rider._id.toString()
+      );
+      
+      const location = locationData?.latestLocation;
+      
+      return {
+        id: rider._id,
+        name: rider.name,
+        phone: rider.phone,
+        email: rider.email,
+        avatar: rider.avatar,
+        status: location?.status || "offline",
+        currentLocation: location?.location ? {
+          lat: location.location.coordinates[1],
+          lng: location.location.coordinates[0]
+        } : null,
+        speed: location?.speed || 0,
+        bearing: location?.bearing || 0,
+        batteryLevel: location?.batteryLevel || 100,
+        lastUpdate: location?.lastUpdate,
+        assignedOrders: 0, // You'll populate this later
+        completedToday: 0, // You'll populate this later
+        vehicle: "Bike", // Default or fetch from user profile
+        rating: 4.5 // Default or fetch from user profile
+      };
+    });
+
+    res.status(200).json({
+      success: true,
+      count: ridersWithLocation.length,
+      riders: ridersWithLocation
+    });
+  } catch (error) {
+    console.error("Error fetching live riders:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message
+    });
+  }
+});
+
+// Get single rider details with location
+router.get("/riders/:riderId", async (req, res) => {
+  try {
+    const { riderId } = req.params;
+    
+    // Get rider info
+    const rider = await User.findById(riderId)
+      .select("_id name phone email role avatar")
+      .lean();
+    
+    if (!rider) {
+      return res.status(404).json({
+        success: false,
+        message: "Rider not found"
+      });
+    }
+    
+    // Get latest location
+    const latestLocation = await RiderLocation.findOne({ riderId })
+      .sort({ lastUpdate: -1 })
+      .lean();
+    
+    const riderData = {
+      id: rider._id,
+      name: rider.name,
+      phone: rider.phone,
+      email: rider.email,
+      avatar: rider.avatar,
+      status: latestLocation?.status || "offline",
+      currentLocation: latestLocation?.location ? {
+        lat: latestLocation.location.coordinates[1],
+        lng: latestLocation.location.coordinates[0]
+      } : null,
+      speed: latestLocation?.speed || 0,
+      bearing: latestLocation?.bearing || 0,
+      batteryLevel: latestLocation?.batteryLevel || 100,
+      lastUpdate: latestLocation?.lastUpdate,
+      assignedOrders: 0,
+      completedToday: 0,
+      vehicle: "Bike",
+      rating: 4.5
+    };
+    
+    res.status(200).json({
+      success: true,
+      rider: riderData
+    });
+  } catch (error) {
+    console.error("Error fetching rider:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message
+    });
+  }
+});
+
 export default router;

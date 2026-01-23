@@ -203,6 +203,8 @@ socket.on("riderLocationUpdate", async (data) => {
       },
       { upsert: true, new: true }
     );
+
+    console.log(`📍 Updated rider ${riderId} location`);
   } catch (error) {
     console.error("Error saving rider location:", error);
   }
@@ -211,6 +213,8 @@ socket.on("riderLocationUpdate", async (data) => {
   io.to("admin-dashboard").emit("riderLocationUpdate", {
     riderId,
     ...locationData,
+    name: user?.name || "Unknown Rider",
+    phone: user?.phone || "N/A",
   });
 });
 
