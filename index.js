@@ -35,7 +35,13 @@ app.use(
       "https://erp.drydash.in",
       "http://localhost:5173",
       "https://new.drydash.in",
-      "http://localhost:8081"
+      "http://localhost:8081",
+      "http://localhost:5174", // Your React admin dev server
+      "https://admin.drydash.in", // Your admin production URL
+      "https://drydash-admin.vercel.app", // If using Vercel
+      // ADD FOR RIDER APP
+      "exp://192.168.10.215:8081", // Expo local development
+      "http://192.168.10.215:8081", // Expo web
     ],
     methods: "GET, POST, PUT, DELETE, PATCH",
     credentials: true, // Allow credentials (cookies) to be sent with the request
@@ -57,11 +63,23 @@ const io = new Server(server, {
       "https://erp.drydash.in",
       "http://localhost:5173",
       "https://new.drydash.in",
-      "http://localhost:8081"
+      "http://localhost:8081",
+      "http://localhost:5174", // Your React admin dev server
+      "https://admin.drydash.in", // Your admin production URL
+      "https://drydash-admin.vercel.app", // If using Vercel
+      // ADD FOR RIDER APP
+      "exp://192.168.10.215:8081", // Expo local development
+      "http://192.168.10.215:8081", // Expo web
+      "*"
     ],
     credentials: true,
+    methods: ["GET", "POST"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   },
   allowEIO3: true,
+  pingTimeout: 60000, // Increase timeout for Render.com
+  pingInterval: 25000,
+  transports: ["websocket", "polling"], // Enable both transports
 });
 
 const addAppToRequest = (app) => {
