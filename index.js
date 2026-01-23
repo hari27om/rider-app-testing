@@ -71,7 +71,6 @@ const addAppToRequest = (app) => {
   };
 };
 
-
 const addSocketToRequest = (io) => {
   return (req, res, next) => {
     req.socket = io; // Add the socket object to the request
@@ -102,7 +101,6 @@ app.get("/test", (req, res) => {
     code: 200,
   });
 });
-
 
 app.use("/api/v1/rider/uploadFiles/:id", addAppToRequest(app), uploadFiles);
 
@@ -163,60 +161,61 @@ io.on("connection", (socket) => {
     socket.emit("allActiveRiders", allRiders);
   });
 
-socket.on("riderLocationUpdate", async (data) => {
-  const { riderId, location, speed, bearing, batteryLevel } = data;
-  if (!riderId || !location) {
-    console.log("Invalid location update:", data);
-    return;
-  }
+  socket.on("riderLocationUpdate", async (data) => {
+    const { riderId, location, speed, bearing, batteryLevel } = data;
+    if (!riderId || !location) {
+      console.log("Invalid location update:", data);
+      return;
+    }
 
-  const locationData = {
-    location: { type: "Point", coordinates: [location.lng, location.lat] },
-    lat: location.lat,
-    lng: location.lng,
-    speed: speed || 0,
-    bearing: bearing || 0,
-    batteryLevel: batteryLevel || 100,
-    lastUpdate: new Date(),
-    status: "active",
-  };
+    const locationData = {
+      location: { type: "Point", coordinates: [location.lng, location.lat] },
+      lat: location.lat,
+      lng: location.lng,
+      speed: speed || 0,
+      bearing: bearing || 0,
+      batteryLevel: batteryLevel || 100,
+      lastUpdate: new Date(),
+      status: "active",
+    };
 
-  // Update in-memory store
-  activeRiderLocations.set(riderId, locationData);
+    // Update in-memory store
+    activeRiderLocations.set(riderId, locationData);
 
-  try {
-    const user = await User.findById(riderId).select("name phone");
+    let user = null;
+    try {
+      user = await User.findById(riderId).select("name phone");
 
-    await RiderLocation.findOneAndUpdate(
-      { riderId },
-      {
-        $set: {
-          name: user?.name || "Unknown Rider",
-          phone: user?.phone || "N/A",
-          location: locationData.location,
-          speed: locationData.speed,
-          bearing: locationData.bearing,
-          batteryLevel: locationData.batteryLevel,
-          status: "active",
-          lastUpdate: locationData.lastUpdate,
-        }
-      },
-      { upsert: true, new: true }
-    );
+      await RiderLocation.findOneAndUpdate(
+        { riderId },
+        {
+          $set: {
+            name: user?.name || "Unknown Rider",
+            phone: user?.phone || "N/A",
+            location: locationData.location,
+            speed: locationData.speed,
+            bearing: locationData.bearing,
+            batteryLevel: locationData.batteryLevel,
+            status: "active",
+            lastUpdate: locationData.lastUpdate,
+          }
+        },
+        { upsert: true, new: true }
+      );
 
-    console.log(`📍 Updated rider ${riderId} location`);
-  } catch (error) {
-    console.error("Error saving rider location:", error);
-  }
+      console.log(`📍 Updated rider ${riderId} location`);
+    } catch (error) {
+      console.error("Error saving rider location:", error);
+    }
 
-  // Broadcast to admin dashboard sockets
-  io.to("admin-dashboard").emit("riderLocationUpdate", {
-    riderId,
-    ...locationData,
-    name: user?.name || "Unknown Rider",
-    phone: user?.phone || "N/A",
+    // Broadcast to admin dashboard sockets
+    io.to("admin-dashboard").emit("riderLocationUpdate", {
+      riderId,
+      ...locationData,
+      name: user?.name || "Unknown Rider",
+      phone: user?.phone || "N/A",
+    });
   });
-});
 
   // Update status (active/idle/offline/etc.)
   socket.on("riderStatusUpdate", ({ riderId, status }) => {
