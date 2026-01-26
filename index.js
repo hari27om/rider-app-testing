@@ -237,20 +237,55 @@ io.on("connection", (socket) => {
   });
 
   // Update status (active/idle/offline/etc.)
-  socket.on("riderStatusUpdate", ({ riderId, status }) => {
+  socket.on("riderStatusUpdate", async ({ riderId, status, lastUpdate }) => {
     if (!riderId || !status) return;
     const riderData = activeRiderLocations.get(riderId);
     if (riderData) {
       riderData.status = status;
-      riderData.lastUpdate = new Date();
+      riderData.lastUpdate = new Date(lastUpdate || Date.now());
       activeRiderLocations.set(riderId, riderData);
-
-      io.to("admin-dashboard").emit("riderStatusUpdate", {
-        riderId,
+    } else {
+      activeRiderLocations.set(riderId, {
         status,
-        lastUpdate: riderData.lastUpdate,
+        lastUpdate: new Date(lastUpdate || Date.now()),
       });
     }
+    try {
+      const user = await User.findById(riderId).select("name phone");
+      const lastLocation = await RiderLocation.findOne({ riderId })
+        .sort({ lastUpdate: -1 })
+        .select("location speed bearing batteryLevel")
+        .lean();
+      await RiderLocation.findOneAndUpdate(
+        { riderId },
+        {
+          $set: {
+            riderId,
+            name: user?.name || "Unknown Rider",
+            phone: user?.phone || "N/A",
+            location: lastLocation?.location || {
+              type: "Point",
+              coordinates: [0, 0]
+            },
+            speed: lastLocation?.speed || 0,
+            bearing: lastLocation?.bearing || 0,
+            batteryLevel: lastLocation?.batteryLevel || 100,
+            status: status,
+            lastUpdate: new Date(),
+          }
+        },
+        { upsert: true, new: true }
+      );
+
+      console.log(`📝 Updated rider ${riderId} status to ${status} in MongoDB`);
+    } catch (error) {
+      console.error("❌ Error updating rider status in MongoDB:", error);
+    }
+    io.to("admin-dashboard").emit("riderStatusUpdate", {
+      riderId,
+      status,
+      lastUpdate: new Date(),
+    });
   });
 
   // Admin asks for specific rider location
@@ -302,20 +337,47 @@ io.on("connection", (socket) => {
   });
 });
 
-// Periodic cleanup: mark riders offline if no update for 5 minutes
-setInterval(() => {
+// Periodic cleanup: mark riders offline if no update for 2 minutes
+setInterval(async () => {
   const now = new Date();
-  const FIVE_MINUTES = 5 * 60 * 1000;
+  const TWO_MINUTES = 2 * 60 * 1000;
 
   for (const [riderId, data] of activeRiderLocations.entries()) {
-    if (now - data.lastUpdate > FIVE_MINUTES && data.status !== "offline") {
+    if (now - data.lastUpdate > TWO_MINUTES && data.status !== "offline") {
       data.status = "offline";
+      data.lastUpdate = now;
       activeRiderLocations.set(riderId, data);
+      try {
+        const user = await User.findById(riderId).select("name phone");
+        const lastLocation = await RiderLocation.findOne({ riderId })
+          .sort({ lastUpdate: -1 })
+          .lean();
+        
+        await RiderLocation.findOneAndUpdate(
+          { riderId },
+          {
+            $set: {
+              riderId,
+              name: user?.name || "Unknown Rider",
+              phone: user?.phone || "N/A",
+              location: lastLocation?.location || { 
+                type: "Point", 
+                coordinates: [0, 0] 
+              },
+              status: "offline",
+              lastUpdate: now,
+            }
+          },
+          { upsert: true }
+        );
+      } catch (error) {
+        console.error("Error updating offline status in DB:", error);
+      }
 
       io.to("admin-dashboard").emit("riderStatusUpdate", {
         riderId,
         status: "offline",
-        lastUpdate: data.lastUpdate,
+        lastUpdate: now,
       });
     }
   }
