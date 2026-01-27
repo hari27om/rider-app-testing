@@ -222,7 +222,7 @@ io.on("connection", (socket) => {
         { upsert: true, new: true }
       );
 
-      console.log(`📍 Updated rider ${riderId}, location = ${location}`);
+      console.log(`📍 Updated rider ${riderId}, location = ${locationData.lat}, ${locationData.lng}`);
     } catch (error) {
       console.error("Error saving rider location:", error);
     }
