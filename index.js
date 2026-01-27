@@ -317,34 +317,17 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     console.log("Client disconnected:", socket.id);
     if (adminRooms.has(socket.id)) adminRooms.delete(socket.id);
-
-    // If a rider disconnected, schedule mark-as-offline after 5 minutes if no further updates
-    if (socket.riderId) {
-      setTimeout(() => {
-        const riderData = activeRiderLocations.get(socket.riderId);
-        if (riderData && new Date() - riderData.lastUpdate > 5 * 60 * 1000) {
-          riderData.status = "offline";
-          activeRiderLocations.set(socket.riderId, riderData);
-
-          io.to("admin-dashboard").emit("riderStatusUpdate", {
-            riderId: socket.riderId,
-            status: "offline",
-            lastUpdate: riderData.lastUpdate,
-          });
-        }
-      }, 5 * 60 * 1000);
-    }
   });
 });
 
 // Periodic cleanup: mark riders offline if no update for 2 minutes
 setInterval(async () => {
   const now = new Date();
-  const TWO_MINUTES = 2 * 60 * 1000;
+  const FIVE_MINUTES = 5 * 60 * 1000;
 
   for (const [riderId, data] of activeRiderLocations.entries()) {
-    if (now - data.lastUpdate > TWO_MINUTES && data.status !== "offline") {
-      data.status = "offline";
+    if (now - data.lastUpdate > FIVE_MINUTES && data.status === "active") {
+      data.status = "idle";
       data.lastUpdate = now;
       activeRiderLocations.set(riderId, data);
       try {
@@ -352,7 +335,7 @@ setInterval(async () => {
         const lastLocation = await RiderLocation.findOne({ riderId })
           .sort({ lastUpdate: -1 })
           .lean();
-        
+
         await RiderLocation.findOneAndUpdate(
           { riderId },
           {
@@ -360,23 +343,24 @@ setInterval(async () => {
               riderId,
               name: user?.name || "Unknown Rider",
               phone: user?.phone || "N/A",
-              location: lastLocation?.location || { 
-                type: "Point", 
-                coordinates: [0, 0] 
+              location: lastLocation?.location || {
+                type: "Point",
+                coordinates: [0, 0]
               },
-              status: "offline",
+              status: "idle",
               lastUpdate: now,
             }
           },
           { upsert: true }
         );
+        console.log(`🟡 Rider ${riderId} marked as IDLE (no updates for 5 min)`);
       } catch (error) {
-        console.error("Error updating offline status in DB:", error);
+        console.error("Error updating idle status in DB:", error);
       }
 
       io.to("admin-dashboard").emit("riderStatusUpdate", {
         riderId,
-        status: "offline",
+        status: "idle",
         lastUpdate: now,
       });
     }
