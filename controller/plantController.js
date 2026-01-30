@@ -3,6 +3,8 @@ import Pickup from "../models/pickupSchema.js";
 import Plant from "../models/plantSchema.js";
 import User from "../models/userModel.js";
 import cron from "node-cron";
+import admin from "../utills/firebaseAdmin.js";
+import RiderPushToken from "../models/riderPushTokenModel.js";
 
 // Create a new plant
 export const addPlant = async (req, res) => {
@@ -98,15 +100,13 @@ export const getRiders = async (req, res) => {
 // Assign rider to an order
 export const assignRider = async (req, res) => {
   try {
-    const { orderId, riderName,riderId} = req.body;
+    const { orderId, riderName, riderId } = req.body;
+    if (!orderId || !riderId) {
+      return res.status(400).json({ message: "orderId and riderId required" });
+    }
 
-    console.log("this is the orderid-->>", orderId, riderName,riderId)
-
-
-    // Get current date in YYYY-MM-DD format
     const riderDate = new Date().toISOString().split("T")[0];
 
-    // Find the order by ID and update the rider name
     const order = await Order.findByIdAndUpdate(
       orderId,
       { riderName, riderDate },
@@ -117,25 +117,88 @@ export const assignRider = async (req, res) => {
       return res.status(404).json({ message: "Order not found" });
     }
 
+    // your existing socket emits
     req.socket.emit("assignOrder", { order });
+    req.socket.to(`rider:${riderId}`).emit("assignOrder", { order });
 
-    if (riderId) {
-      req.socket
-        .to(`rider:${riderId}`)
-        .emit("assignOrder", { order });
+    // --- NEW: send FCM pushes to rider's registered tokens ---
+    try {
+      // fetch active tokens for this rider
+      const tokensDocs = await RiderPushToken.find({ riderId, isActive: true }).lean();
+      const tokens = tokensDocs.map((d) => d.token).filter(Boolean);
+
+      if (tokens.length > 0 && admin && admin.messaging) {
+        // Build message: notification + data (system will display notification even if app killed)
+        const messagePayload = {
+          notification: {
+            title: "New delivery assigned",
+            body: `Order ${order.order_id} — tap to view`,
+          },
+          data: {
+            orderId: String(order._id),
+            type: "delivery_assigned",
+            // add deep link if your app supports it
+            // deep_link: `drydash://order/${order._id}`,
+          },
+          android: {
+            priority: "high",
+            notification: {
+              channelId: "assignments",
+            },
+          },
+        };
+
+        // sendMulticast supports up to 500 tokens at once
+        const response = await admin.messaging().sendMulticast({
+          tokens,
+          ...messagePayload,
+        });
+
+        // handle failures: mark bad tokens inactive
+        const responses = response.responses || [];
+        const toDisable = [];
+        responses.forEach((r, idx) => {
+          if (!r.success) {
+            const err = r.error;
+            // defensive checks: different environments may have different messages/codes
+            const code = err?.code || "";
+            if (
+              code.includes("registration-token-not-registered") ||
+              code.includes("invalid-registration-token") ||
+              code.includes("messaging/registration-token-not-registered") ||
+              code.includes("messaging/invalid-registration-token")
+            ) {
+              toDisable.push(tokens[idx]);
+            } else {
+              console.warn("FCM send error (non-fatal) for token:", tokens[idx], err);
+            }
+          }
+        });
+
+        if (toDisable.length) {
+          await RiderPushToken.updateMany(
+            { token: { $in: toDisable } },
+            { $set: { isActive: false, lastSeenAt: new Date() } }
+          );
+          console.log("Marked invalid tokens inactive:", toDisable.length);
+        }
+
+        console.log(`FCM: sent ${response.successCount} / ${response.responses.length}`);
+      } else {
+        console.log("No push tokens found for rider", riderId);
+      }
+    } catch (fcmErr) {
+      console.error("Error sending FCM in assignRider:", fcmErr);
+      // do not fail assignment because push errored; we already emitted sockets
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       status: "success",
-      data: {
-        order,
-      },
+      data: { order },
     });
   } catch (error) {
-    res.status(500).json({
-      status: "error",
-      message: error.message,
-    });
+    console.error("assignRider error:", error);
+    return res.status(500).json({ status: "error", message: error.message });
   }
 };
 

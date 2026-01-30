@@ -15,6 +15,7 @@ import cookies from "cookie-parser";
 import { uploadFiles } from "./controller/riderController.js";
 import riderLocationRoutes from "./routes/riderLocationRoutes.js";
 import RiderLocation from "./models/riderLocationSchema.js";
+import pushTokenRoutes from "./routes/pushTokenRoutes.js";
 import User from "./models/userModel.js";
 
 const app = express();
@@ -367,6 +368,7 @@ setInterval(async () => {
   }
 }, 60 * 1000);
 
+app.use("/api/v1/rider/push-tokens", pushTokenRoutes);
 app.use("/api/v1", customerRoutes);
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/rider", riderRoutes);
