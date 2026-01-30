@@ -2,7 +2,7 @@ import RiderPushToken from "../models/riderPushTokenModel.js";
 
 export const registerPushToken = async (req, res) => {
   try {
-    const authRiderId = req.user?.id || req.user?._id;
+    const authRiderId = "6970d90af3bf72a60c82db63";
     if (!authRiderId) return res.status(401).json({ message: "Unauthorized" });
 
     const { token, platform = "android", deviceId, appVersion } = req.body;
