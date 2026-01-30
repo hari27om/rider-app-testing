@@ -7,6 +7,7 @@ import plantRoutes from "./routes/plantRoutes.js";
 import customerRoutes from "./routes/customerRoutes.js";
 import revenueRoutes from "./routes/revenueRoutes.js";
 import AppError from "./utills/appError.js";
+import tripRoutes from "./routes/tripRoutes.js";
 import http from "http";
 import cors from "cors";
 import os from "os";
@@ -369,6 +370,7 @@ setInterval(async () => {
 }, 60 * 1000);
 
 app.use("/api/v1/rider/push-tokens", pushTokenRoutes);
+app.use("/api/v1/trips", tripRoutes);
 app.use("/api/v1", customerRoutes);
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/rider", riderRoutes);

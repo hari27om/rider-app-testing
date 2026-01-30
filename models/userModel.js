@@ -17,67 +17,77 @@ const minimumLimit = function (val) {
 };
 
 const userSchema = new mongoose.Schema({
-  name: {
-    type: String,
-    required: [true, "Please tell us your name!"],
-  },
-  email: {
-    type: String,
-    required: [true, "Please provide your email"],
-    unique: true,
-    lowercase: true,
-    validate: [validator.isEmail, "Please provide a valid email"],
-  },
-  avatar: {
-    type: String,
-    default: "default.jpg",
-  },
-  phone: {
-    type: String,
-    index: true,
-    unique: true,
-    validate: [minimumLimit, "Enter at least one phone number"],
-  },
-  role: {
-    type: String,
-    enum: ["customer", "admin", "rider", "plant-manager"],
-    default: "admin",
-  },
-  plant: {
-    type: String,
-    required: [true, "Please Select your plant"],
-  },
-  password: {
-    type: String,
-    required: [true, "Please provide a password"],
-    minlength: 8,
-    select: false,
-  },
-  passwordConfirm: {
-    type: String,
-    required: [true, "Please confirm your password"],
-    validate: {
-      validator: function (el) {
-        return el === this.password;
-      },
-      message: "Passwords are not the same!",
+    name: {
+      type: String,
+      required: [true, "Please tell us your name!"],
     },
-  },
-  addharCardNo: {
-    type: Number,
-    required: [true, "Addhar card no, can not be more than or less 16 digit"],
-    minlength: 16,
-    maxlength: 16,
-    select: false,
-  },
-  drivingLicence: {
-    type: String,
-    select: false,
-  },
-  refreshToken: String,
-  passwordChangedAt: Date,
-  passwordResetToken: String,
-  passwordResetExpires: Date,
+    email: {
+      type: String,
+      required: [true, "Please provide your email"],
+      unique: true,
+      lowercase: true,
+      validate: [validator.isEmail, "Please provide a valid email"],
+    },
+    avatar: {
+      type: String,
+      default: "default.jpg",
+    },
+    phone: {
+      type: String,
+      index: true,
+      unique: true,
+      validate: [minimumLimit, "Enter at least one phone number"],
+    },
+    role: {
+      type: String,
+      enum: ["customer", "admin", "rider", "plant-manager"],
+      default: "admin",
+    },
+    plant: {
+      type: String,
+      required: [true, "Please Select your plant"],
+    },
+
+    totalKm: {
+      type: Number,
+      default: 0,
+    },
+    lastResetAt: {
+      type: Date,
+      default: null,
+    },
+
+    password: {
+      type: String,
+      required: [true, "Please provide a password"],
+      minlength: 8,
+      select: false,
+    },
+    passwordConfirm: {
+      type: String,
+      required: [true, "Please confirm your password"],
+      validate: {
+        validator: function (el) {
+          return el === this.password;
+        },
+        message: "Passwords are not the same!",
+      },
+    },
+    addharCardNo: {
+      type: Number,
+      required: [true, "Addhar card no, can not be more than or less 16 digit"],
+      minlength: 16,
+      maxlength: 16,
+      select: false,
+    },
+    drivingLicence: {
+      type: String,
+      select: false,
+    },
+    refreshToken: String,
+    passwordChangedAt: Date,
+    passwordResetToken: String,
+    passwordResetExpires: Date,
 });
 
 userSchema.pre("save", async function (next) {
