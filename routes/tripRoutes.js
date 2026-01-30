@@ -4,7 +4,7 @@ import {
   endTrip,
   getTrips,
   resetTotalKm,
-} from "../controllers/tripController.js";
+} from "../controller/tripController.js";
 
 const router = express.Router();
 
